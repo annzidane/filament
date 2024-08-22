@@ -10,9 +10,8 @@ use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
-use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
 
 class BarangResource extends Resource
 {
@@ -37,9 +36,8 @@ class BarangResource extends Resource
                     ->image()
                     ->multiple()
                     ->directory('gambar')
-                    ->disk('public')  // pastikan disk public sudah dikonfigurasi
-                    ->maxFiles(5) // limitasi jumlah gambar yang bisa diupload
-                    ->required(),
+                    ->disk('public')
+                    ->maxFiles(5),
             ]);
     }
 
@@ -66,6 +64,13 @@ class BarangResource extends Resource
                     ->label('Stok')
                     ->sortable()
                     ->searchable(),
+                Tables\Columns\ImageColumn::make('gambar')
+                    ->label('Gambar')
+                    ->disk('public')
+                    ->getStateUsing(function (Barang $record) {
+                        $firstGambar = $record->gambar->first();
+                        return $firstGambar ? asset('storage/' . $firstGambar->path) : null;
+                    }),
                 Tables\Columns\TextColumn::make('created_at')
                     ->label('Dibuat Pada')
                     ->dateTime('d M y')
@@ -74,11 +79,6 @@ class BarangResource extends Resource
                     ->label('Diperbarui Pada')
                     ->dateTime('d M y')
                     ->sortable(),
-                Tables\Columns\ImageColumn::make('gambar')
-                    ->label('Gambar')
-                    ->disk('public') // sesuaikan dengan disk yang digunakan
-                    ->path('gambar') // folder tempat gambar disimpan
-                    ->multiple(),
             ])
             ->filters([
                 // Tambahkan filter jika diperlukan
@@ -109,37 +109,23 @@ class BarangResource extends Resource
 
     protected function mutateFormDataBeforeCreate(array $data): array
     {
+        return $this->handleGambarData($data);
+    }
+
+    protected function mutateFormDataBeforeSave(array $data): array
+    {
+        return $this->handleGambarData($data);
+    }
+
+    private function handleGambarData(array $data): array
+    {
         $gambarPaths = $data['gambar'] ?? [];
         unset($data['gambar']);
 
         $barang = Barang::create($data);
 
-        foreach ($gambarPaths as $path) {
-            Gambar::create([
-                'barang_id' => $barang->id,
-                'path' => $path,
-            ]);
-        }
-
-        return $data;
-    }
-
-    protected function mutateFormDataBeforeSave(array $data): array
-    {
-        $gambarPaths = $data['gambar'] ?? [];
-        unset($data['gambar']);
-
-        $barang = $this->record;
-
-        if ($barang) {
-            Gambar::where('barang_id', $barang->id)->delete();
-        }
-
-        foreach ($gambarPaths as $path) {
-            Gambar::create([
-                'barang_id' => $barang->id,
-                'path' => $path,
-            ]);
+        if ($barang && !empty($gambarPaths)) {
+            $barang->saveGambar($gambarPaths);
         }
 
         return $data;
